@@ -8,20 +8,16 @@ import sys
 import socket
 import serial
 import pdb
+import struct
+import numpy as np
+import RadarRT_lib
+from circular_buffer import ring_buffer
+import Queue
+from  ctypes import *
+from radar_config import dict_to_list
+
+
 class mmWave_Sensor():
-    #  iwr1443boost configuration commands
-    iwr_cfg_cmd = [ \
-        'flushCfg', \
-        'dfeDataOutputMode 1', \
-        'channelCfg 15 1 0', \
-        'adcCfg 2 1', \
-        'lowPower 0 1', \
-        'profileCfg 0 77 20 5 80 0 0 40 1 256 7000 0 0 30', \
-        'chirpCfg 0 0 0 0 0 0 0 1', \
-        'frameCfg 0 0 128 0 20 1 0', \
-        'testFmkCfg 0 0 0 1', \
-        'setProfileCfg disable ADC disable'
-    ]
     iwr_rec_cmd = ['sensorStop', 'sensorStart']
     # dca1000evm configuration commands; only the ones used are filled in
     dca_cmd = { \
@@ -53,23 +49,24 @@ class mmWave_Sensor():
     capture_started = 0
 
     data_file = None
-    data_filename = None
 
-    def __init__(self):
+    def __init__(self,data_filename):
         #super().__init__()
 
-        self.dca_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.dca_socket.bind(("192.168.33.30", 4096))
-        self.dca_socket.settimeout(10)
-        self.dca_socket_open = True
-
-        self.data_socket = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
-        self.data_socket.bind(("192.168.33.30",4098))
+        self.data_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.data_socket.bind(("192.168.33.30", 4098))
         self.data_socket.settimeout(2.5e-5)
         self.data_socket_open = True
 
-        self.iwr_serial = serial.Serial(port='/dev/ttyACM0', baudrate=115200, bytesize=serial.EIGHTBITS, parity=serial.PARITY_NONE, stopbits=serial.STOPBITS_ONE, timeout=0.100)
-        self.serial_open = self.iwr_serial.is_open
+
+        self.seqn = 0  # this is the last packet index
+        self.bytec = 0 # this is a byte counter
+        self.data_filename = data_filename + '_mmWaveData.bin'
+        self.q = Queue.Queue()
+        # self.data_array = ring_buffer(int(20000), int(10000))
+        frame_len = 2*rospy.get_param('iwr_cfg/profiles')[0]['adcSamples']*rospy.get_param('iwr_cfg/numLanes')*rospy.get_param('iwr_cfg/numChirps')
+        #pdb.set_trace()
+        self.data_array = ring_buffer(int(2*frame_len), int(frame_len))
 
     def close(self):
         self.dca_socket.close()
@@ -105,6 +102,15 @@ class mmWave_Sensor():
                 continue
 
     def setupDCA_and_cfgIWR(self):
+        self.dca_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.dca_socket.bind(("192.168.33.30", 4096))
+        self.dca_socket.settimeout(10)
+        self.dca_socket_open = True
+
+        self.iwr_serial = serial.Serial(port='/dev/ttyACM0', baudrate=115200, bytesize=serial.EIGHTBITS,
+                                        parity=serial.PARITY_NONE, stopbits=serial.STOPBITS_ONE, timeout=0.100)
+        self.serial_open = self.iwr_serial.is_open
+
         if not self.dca_socket or not self.iwr_serial:
             return
 
@@ -125,13 +131,14 @@ class mmWave_Sensor():
 
         # configure IWR
         print("CONFIGURE IWR")
+        iwr_cfg_cmd = dict_to_list(rospy.get_param('iwr_cfg'))
         #Send and read a few CR to clear things in buffer. Happens sometimes during power on
         for i in range(5):
             self.iwr_serial.write('\r'.encode())
             self.iwr_serial.reset_input_buffer()
             time.sleep(.1)
 
-        for cmd in self.iwr_cfg_cmd:
+        for cmd in iwr_cfg_cmd:
             for i in range(len(cmd)):
                 self.iwr_serial.write(cmd[i].encode('utf-8'))
                 time.sleep(0.010)   #  10 ms delay between characters
@@ -154,7 +161,7 @@ class mmWave_Sensor():
         print("success!")
         print("")
 
-    def toggle_capture(self, toggle=0, id_val=0, dir_path=''):
+    def toggle_capture(self, toggle=0, dir_path=''):
         if not self.dca_socket or not self.iwr_serial:
             return
 
@@ -183,7 +190,7 @@ class mmWave_Sensor():
                 except:
                     os.mkdir(path)
 
-            self.data_filename = path + str(id_val) + '_mmWaveData.bin'
+            # self.data_filename = path + str(id_val) + '_mmWaveData.bin'
             self.open_data_file()
 
         elif sensor_cmd == 'sensorStop':
@@ -210,13 +217,30 @@ class mmWave_Sensor():
 
     def collect_data(self):
         if not self.data_file:
-            print('No data file is opened for recording capture.')
+            # print('No data file is opened for recording capture.')
             return
 
         try:
             msg, server = self.data_socket.recvfrom(2048)
-            self.data_file.write(msg)
-        except:
+
+        except Exception as e:
             return
+
+        #self.data_file.write(msg)  # keep to compare rosbag with binary here
+        seqn, bytec = struct.unpack('<IIxx', msg[:10])
+        # print str(self.seqn) + ' ' + str(seqn) #+ ' ' + str(q.qsize())
+        if self.seqn + 1 != seqn:
+            print("@seq {}-{}: ".format(self.seqn, seqn))
+            # make for queue below
+            num_zeros = c_longlong((seqn - self.seqn - 1) * 728)
+            print 'num zeros ',num_zeros.value
+            #num_zeros = (bytec - self.bytec - 1456)//2 #numer of samples not bytes
+            self.data_array.add_zeros(num_zeros)
+        self.data_array.add_msg(np.frombuffer(msg[10:], dtype=np.int16))
+
+        self.seqn = seqn
+        self.bytec = bytec
+
+
 
 
