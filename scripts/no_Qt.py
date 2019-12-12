@@ -12,7 +12,7 @@ import socket
 import serial
 import pdb
 from mmWave_class_noQt import mmWave_Sensor
-import RadarRT_lib
+#import RadarRT_lib
 import Queue
 import threading
 import pickle

@@ -10,7 +10,7 @@ import serial
 import pdb
 import struct
 import numpy as np
-import RadarRT_lib
+#import RadarRT_lib
 from circular_buffer import ring_buffer
 import Queue
 from  ctypes import *
