@@ -50,37 +50,29 @@ class mmWave_Sensor():
 
     data_file = None
 
-    def __init__(self,data_filename):
-        #super().__init__()
+    def __init__(self):
 
         self.data_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.data_socket.bind(("192.168.33.30", 4098))
         self.data_socket.settimeout(2.5e-5)
         self.data_socket_open = True
 
-
         self.seqn = 0  # this is the last packet index
         self.bytec = 0 # this is a byte counter
-        self.data_filename = data_filename + '_mmWaveData.bin'
         self.q = Queue.Queue()
-        # self.data_array = ring_buffer(int(20000), int(10000))
         frame_len = 2*rospy.get_param('iwr_cfg/profiles')[0]['adcSamples']*rospy.get_param('iwr_cfg/numLanes')*rospy.get_param('iwr_cfg/numChirps')
-        #pdb.set_trace()
         self.data_array = ring_buffer(int(2*frame_len), int(frame_len))
 
     def close(self):
         self.dca_socket.close()
         self.data_socket.close()
         self.iwr_serial.close()
-        self.close_data_file()
 
     def collect_response(self):
         status = 1
         while status:
             try:
                 msg, server = self.dca_socket.recvfrom(2048)
-                # pdb.set_trace()
-                # status = int.from_bytes(msg[4:6], byteorder='little')
                 import struct
                 (status,) = struct.unpack('<H', msg[4:6])
 
@@ -119,7 +111,6 @@ class mmWave_Sensor():
         self.dca_socket.sendto(self.dca_cmd['SYSTEM_CONNECT_CMD_CODE'], self.dca_cmd_addr)
         import sys
         print(sys.version)
-        print('checkpoint1')
         self.collect_response()
         self.dca_socket.sendto(self.dca_cmd['READ_FPGA_VERSION_CMD_CODE'], self.dca_cmd_addr)
         self.collect_response()
@@ -132,7 +123,7 @@ class mmWave_Sensor():
         # configure IWR
         print("CONFIGURE IWR")
         iwr_cfg_cmd = dict_to_list(rospy.get_param('iwr_cfg'))
-        #Send and read a few CR to clear things in buffer. Happens sometimes during power on
+        # Send and read a few CR to clear things in buffer. Happens sometimes during power on
         for i in range(5):
             self.iwr_serial.write('\r'.encode())
             self.iwr_serial.reset_input_buffer()
@@ -141,10 +132,10 @@ class mmWave_Sensor():
         for cmd in iwr_cfg_cmd:
             for i in range(len(cmd)):
                 self.iwr_serial.write(cmd[i].encode('utf-8'))
-                time.sleep(0.010)   #  10 ms delay between characters
+                time.sleep(0.010)  # 10 ms delay between characters
             self.iwr_serial.write('\r'.encode())
             self.iwr_serial.reset_input_buffer()
-            time.sleep(0.010)       #  10 ms delay between characters
+            time.sleep(0.010)       # 10 ms delay between characters
             time.sleep(0.100)       # 100 ms delay between lines
             response = self.iwr_serial.read(size=6)
             print('LVDS Stream:/>' + cmd)
@@ -181,45 +172,13 @@ class mmWave_Sensor():
         print('LVDS Stream:/>' + sensor_cmd)
         print(response.decode('utf-8'))
 
-        if sensor_cmd == 'sensorStart':
-            # create path if needed
-            path = dir_path
-            if path != '':
-                try:
-                    os.stat(path)
-                except:
-                    os.mkdir(path)
-
-            # self.data_filename = path + str(id_val) + '_mmWaveData.bin'
-            self.open_data_file()
-
-        elif sensor_cmd == 'sensorStop':
-            self.close_data_file()
+        if sensor_cmd == 'sensorStop':
             self.dca_socket.sendto(self.dca_cmd['RECORD_STOP_CMD_CODE'], self.dca_cmd_addr)
             self.collect_response()
 
         self.capture_started = toggle
 
-    def open_data_file(self):
-        try:
-            os.remove(self.data_filename)
-        except OSError:
-            pass
-        self.data_file = open(self.data_filename, 'wb')
-
-    def close_data_file(self):
-        if not self.data_file or not self.data_filename:
-            return
-
-        self.data_file.close()
-        self.data_file = None
-        self.data_filename = None
-
     def collect_data(self):
-        if not self.data_file:
-            # print('No data file is opened for recording capture.')
-            return
-
         try:
             msg, server = self.data_socket.recvfrom(2048)
 
@@ -233,14 +192,10 @@ class mmWave_Sensor():
             print("@seq {}-{}: ".format(self.seqn, seqn))
             # make for queue below
             num_zeros = c_longlong((seqn - self.seqn - 1) * 728)
-            print 'num zeros ',num_zeros.value
+            print ('num zeros ',num_zeros.value)
             #num_zeros = (bytec - self.bytec - 1456)//2 #numer of samples not bytes
             self.data_array.add_zeros(num_zeros)
         self.data_array.add_msg(np.frombuffer(msg[10:], dtype=np.int16))
 
         self.seqn = seqn
         self.bytec = bytec
-
-
-
-
