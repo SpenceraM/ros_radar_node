@@ -74,3 +74,7 @@ rosrun ros_radar_node listener.py
 ### Troubleshooting
 One bug that may occur on different devices is using the wrong port. In `mmWave_class_noQt.py`, find the function `setupDCA_and_cfgIWR`.
 Currently, the port is set to `'/dev/ttyACM0'`. This may change based on the device. An easy way to check which port to use is checking the contents of the `\dev\` folder when the devices are properly plugged in. There might be multiple `ttyACM*` items. Change the port value in the code to one of the available port names.
+
+#TODO:
+- [ ] Document 1843 1443 differences
+- [ ] Better documentation for config
