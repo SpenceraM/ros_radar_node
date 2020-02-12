@@ -55,8 +55,15 @@ chmod +x listener.py
 ```
 
 4. To run the test configuration from the json, open a new terminal, navigate into the scripts/ directory, and run:
+
+xWR1443:
 ```
 rosrun ros_radar_node noQt.py test
+```
+
+xWR1843:
+```
+rosrun ros_radar_node noQt.py test_1843
 ```
 
 5. To make sure the radar frames are being published without saving the messages into a rosbag, run the following in a new terminal.
