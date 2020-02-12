@@ -78,3 +78,4 @@ Currently, the port is set to `'/dev/ttyACM0'`. This may change based on the dev
 #TODO:
 - [ ] Document 1843 1443 differences
 - [ ] Better documentation for config
+- [ ] Add support for 1843 object data in serial console
